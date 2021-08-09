@@ -365,13 +365,21 @@ class GenerationMixin:
     A class containing all of the functions supporting generation, to be used as a mixin in
     :class:`~transformers.PreTrainedModel`.
     """
-
-    def prepare_inputs_for_generation(self, input_ids: torch.LongTensor, **kwargs) -> Dict[str, Any]:
+    ##############################################################################################
+    '''def prepare_inputs_for_generation(self, input_ids: torch.LongTensor, **kwargs) -> Dict[str, Any]:
         """
         Implement in subclasses of :class:`~transformers.PreTrainedModel` for custom behavior to prepare inputs in the
         generate method.
         """
-        return {"input_ids": input_ids}
+        return {"input_ids": input_ids}'''
+    ##############################################################################################
+
+    def prepare_inputs_for_generation(self, inputs_embeds: torch.LongTensor, **kwargs) -> Dict[str, Any]:
+        """
+        Implement in subclasses of :class:`~transformers.PreTrainedModel` for custom behavior to prepare inputs in the
+        generate method.
+        """
+        return {"inputs_embeds": inputs_embeds}
 
     def adjust_logits_during_generation(self, logits: torch.FloatTensor, **kwargs) -> torch.FloatTensor:
         """
@@ -403,7 +411,8 @@ class GenerationMixin:
             return input_ids.ne(pad_token_id).long()
         return input_ids.new_ones(input_ids.shape, dtype=torch.long)
 
-    def _prepare_encoder_decoder_kwargs_for_generation(
+    ########################################################################
+    '''def _prepare_encoder_decoder_kwargs_for_generation(
         self, input_ids: torch.LongTensor, model_kwargs
     ) -> Dict[str, Any]:
         if "encoder_outputs" not in model_kwargs:
@@ -415,14 +424,38 @@ class GenerationMixin:
                 if not (argument.startswith("decoder_") or argument.startswith("cross_attn"))
             }
             model_kwargs["encoder_outputs"]: ModelOutput = encoder(input_ids, return_dict=True, **encoder_kwargs)
+        return model_kwargs'''
+    ########################################################################
+    def _prepare_encoder_decoder_kwargs_for_generation(
+        self, inputs_embeds: torch.LongTensor, model_kwargs
+    ) -> Dict[str, Any]:
+        if "encoder_outputs" not in model_kwargs:
+            # retrieve encoder hidden states
+            encoder = self.get_encoder()
+            encoder_kwargs = {
+                argument: value
+                for argument, value in model_kwargs.items()
+                if not (argument.startswith("decoder_") or argument.startswith("cross_attn"))
+            }
+            model_kwargs["encoder_outputs"]: ModelOutput = encoder(inputs_embeds = inputs_embeds, return_dict=True, **encoder_kwargs)
         return model_kwargs
 
-    def _prepare_decoder_input_ids_for_generation(
+    ########################################################################
+    '''def _prepare_decoder_input_ids_for_generation(
         self, input_ids: torch.LongTensor, decoder_start_token_id: int = None, bos_token_id: int = None
     ) -> torch.LongTensor:
         decoder_start_token_id = self._get_decoder_start_token_id(decoder_start_token_id, bos_token_id)
         decoder_input_ids = (
             torch.ones((input_ids.shape[0], 1), dtype=torch.long, device=input_ids.device) * decoder_start_token_id
+        )
+        return decoder_input_ids'''
+    ########################################################################
+    def _prepare_decoder_input_ids_for_generation(
+        self, inputs_embeds: torch.LongTensor, decoder_start_token_id: int = None, bos_token_id: int = None
+    ) -> torch.LongTensor:
+        decoder_start_token_id = self._get_decoder_start_token_id(decoder_start_token_id, bos_token_id)
+        decoder_input_ids = (
+            torch.ones((inputs_embeds.shape[0], 1), dtype=torch.long, device=inputs_embeds.device) * decoder_start_token_id
         )
         return decoder_input_ids
 
@@ -471,6 +504,7 @@ class GenerationMixin:
             torch.arange(input_ids.shape[0]).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
         )
         input_ids = input_ids.index_select(0, expanded_return_idx)
+
 
         if "token_type_ids" in model_kwargs:
             token_type_ids = model_kwargs["token_type_ids"]
@@ -551,7 +585,10 @@ class GenerationMixin:
         repetition_penalty: float,
         no_repeat_ngram_size: int,
         encoder_no_repeat_ngram_size: int,
-        encoder_input_ids: torch.LongTensor,
+        ####################################################
+        #encoder_input_ids: torch.LongTensor,
+        ####################################################
+        encoder_inputs_embeds: torch.LongTensor,
         bad_words_ids: List[List[int]],
         min_length: int,
         max_length: int,
@@ -609,7 +646,10 @@ class GenerationMixin:
             processors.append(NoRepeatNGramLogitsProcessor(no_repeat_ngram_size))
         if encoder_no_repeat_ngram_size is not None and encoder_no_repeat_ngram_size > 0:
             if self.config.is_encoder_decoder:
-                processors.append(EncoderNoRepeatNGramLogitsProcessor(encoder_no_repeat_ngram_size, encoder_input_ids))
+                ###########################################################################################
+                #processors.append(EncoderNoRepeatNGramLogitsProcessor(encoder_no_repeat_ngram_size, encoder_input_ids))
+                ###########################################################################################
+                processors.append(EncoderNoRepeatNGramLogitsProcessor(encoder_no_repeat_ngram_size, encoder_inputs_embeds))
             else:
                 raise ValueError(
                     "It's impossible to use `encoder_no_repeat_ngram_size` with decoder-only architecture"
@@ -644,6 +684,7 @@ class GenerationMixin:
     def generate(
         self,
         input_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.LongTensor] = None,  ########################################newly added
         max_length: Optional[int] = None,
         min_length: Optional[int] = None,
         do_sample: Optional[bool] = None,
@@ -898,10 +939,11 @@ class GenerationMixin:
 
         model_kwargs["output_attentions"] = output_attentions
         model_kwargs["output_hidden_states"] = output_hidden_states
-
-        if input_ids is None and "inputs_embeds" not in model_kwargs:
-            # init `input_ids` with bos_token_id
-            input_ids = self._prepare_input_ids_for_generation(bos_token_id, model_kwargs.get("encoder_outputs"))
+        #########################################################################################################
+        #if input_ids is None and "inputs_embeds" not in model_kwargs:
+        #    # init `input_ids` with bos_token_id
+        #    input_ids = self._prepare_input_ids_for_generation(bos_token_id, model_kwargs.get("encoder_outputs"))
+        ######################################################################################################
 
         if model_kwargs.get("attention_mask", None) is None:
             # init `attention_mask` depending on `pad_token_id`
@@ -914,20 +956,31 @@ class GenerationMixin:
             logger.warning(f"Setting `pad_token_id` to `eos_token_id`:{eos_token_id} for open-end generation.")
             pad_token_id = eos_token_id
 
+        ######################################################################################################
         # Storing encoder_input_ids for logits_processor that could use them
-        encoder_input_ids = input_ids if self.config.is_encoder_decoder else None
+        #encoder_input_ids = input_ids if self.config.is_encoder_decoder else None
+        ######################################################################################################
+        encoder_inputs_embeds = inputs_embeds if self.config.is_encoder_decoder else None
 
         if self.config.is_encoder_decoder:
             # add encoder_outputs to model_kwargs
-            model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(input_ids, model_kwargs)
+            ######################################################################################################
+            #model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(input_ids, model_kwargs)
+            ######################################################################################################
+            model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(inputs_embeds, model_kwargs)
 
             # set input_ids as decoder_input_ids
             if "decoder_input_ids" in model_kwargs:
                 input_ids = model_kwargs.pop("decoder_input_ids")
             else:
+                ######################################################################################################
+                #input_ids = self._prepare_decoder_input_ids_for_generation(
+                #    input_ids, decoder_start_token_id=decoder_start_token_id, bos_token_id=bos_token_id
+                #)
+                ######################################################################################################
                 input_ids = self._prepare_decoder_input_ids_for_generation(
-                    input_ids, decoder_start_token_id=decoder_start_token_id, bos_token_id=bos_token_id
-                )
+                    inputs_embeds, decoder_start_token_id=decoder_start_token_id, bos_token_id=bos_token_id
+                 )
 
             if "encoder_outputs" not in model_kwargs or not isinstance(model_kwargs["encoder_outputs"], ModelOutput):
                 raise ValueError("Make sure that `model_kwargs` include `encoder_outputs` of type `ModelOutput`.")
@@ -960,7 +1013,10 @@ class GenerationMixin:
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
             encoder_no_repeat_ngram_size=encoder_no_repeat_ngram_size,
-            encoder_input_ids=encoder_input_ids,
+            #############################################
+            #encoder_input_ids=encoder_input_ids,
+            #############################################
+            encoder_inputs_embeds=encoder_inputs_embeds,
             bad_words_ids=bad_words_ids,
             min_length=min_length,
             max_length=max_length,
@@ -1762,11 +1818,14 @@ class GenerationMixin:
         batch_size = len(beam_scorer._beam_hyps)
         num_beams = beam_scorer.num_beams
 
+
         batch_beam_size, cur_len = input_ids.shape
+
 
         assert (
             num_beams * batch_size == batch_beam_size
         ), f"Batch dimension of `input_ids` should be {num_beams * batch_size}, but is {batch_beam_size}."
+
 
         beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device)
         beam_scores[:, 1:] = -1e9

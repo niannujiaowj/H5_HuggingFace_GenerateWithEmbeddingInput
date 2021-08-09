@@ -49,7 +49,6 @@ LOGITS_PROCESSOR_INPUTS_DOCSTRING = r"""
 
 """
 
-
 class LogitsProcessor(ABC):
     """Abstract base class for all logit processors that can be applied during generation."""
 
